@@ -25,7 +25,7 @@ Antes de começar, instale os programas abaixo no seu computador. Todos são **g
 Abra o **PowerShell** ou **Prompt de Comando** e execute:
 
 ```bash
-git clone https://github.com/seu-usuario/ecofin.git
+git clone https://github.com/marconesdb/ecofin_V3_GestorFinanceiroDomestico.git
 ```
 
 > ⚠️ Substitua `seu-usuario` pelo nome real do usuário ou organização no GitHub.
