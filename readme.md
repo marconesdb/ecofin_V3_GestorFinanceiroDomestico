@@ -4,15 +4,9 @@
 
 ---
 
-![Layout para Desktops](/frontend/preview-01.png)
-
-
-
-![Layout para Desktops](/frontend/preview-02.png)
-
-
-
-![Layout para Desktops](/frontend/preview-03.png)
+![Layout para Desktops](preview-01.png)
+![Layout para Desktops](preview-02.png)
+![Layout para Desktops](preview-03.png)
 
 ## 📋 O que você vai precisar instalar antes de tudo
 
