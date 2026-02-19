@@ -20,10 +20,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ─── Middlewares Globais ────────────────────────────────────
-app.use(helmet());                            // cabeçalhos HTTP seguros
+app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json());
-app.use(morgan('dev'));                        // log de requisições
+app.use(morgan('dev'));
 
 // Rate Limiter (100 req/15min por IP)
 app.use(rateLimit({
@@ -45,13 +45,13 @@ const pool = mysql.createPool({
   connectionLimit:    10,
   queueLimit:         0,
   timezone: '-03:00',
+  ssl: { rejectUnauthorized: false }  // ← SSL para Clever Cloud
 });
 
 // ─── Inicialização do Banco de Dados ────────────────────────
 async function initDB() {
   const conn = await pool.getConnection();
   try {
-    // Tabela de despesas
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS expenses (
         id          VARCHAR(36)    NOT NULL PRIMARY KEY,
@@ -70,7 +70,6 @@ async function initDB() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // Tabela de orçamentos
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS budgets (
         id            INT UNSIGNED   NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -109,7 +108,6 @@ const VALID_CATEGORIES = [
 //  ROTAS — DESPESAS
 // ════════════════════════════════════════════════════════════
 
-// GET /api/expenses  — lista com filtros opcionais
 app.get('/api/expenses', async (req, res, next) => {
   try {
     const { category, startDate, endDate, search, page = 1, limit = 50 } = req.query;
@@ -124,21 +122,19 @@ app.get('/api/expenses', async (req, res, next) => {
 
     sql += ' ORDER BY date DESC, created_at DESC';
 
-    // paginação
     const offset = (parseInt(page) - 1) * parseInt(limit);
     sql += ` LIMIT ${parseInt(limit)} OFFSET ${offset}`;
 
     const [rows] = await pool.execute(sql, vals);
 
-    // total sem paginação (para frontend)
     const [[{ total }]] = await pool.execute(
       `SELECT COUNT(*) AS total FROM expenses WHERE 1=1${
         category  ? ' AND category = ?' : ''}${
         startDate ? ' AND date >= ?'    : ''}${
         endDate   ? ' AND date <= ?'    : ''}${
         search    ? ' AND description LIKE ?' : ''}`,
-      vals.slice(0, vals.length - 0) // mesmos args sem LIMIT
-        .filter((_, i) => {          // remove os args de paginação
+      vals.slice(0, vals.length - 0)
+        .filter((_, i) => {
           const base = [];
           if (category)  base.push(category);
           if (startDate) base.push(startDate);
@@ -159,7 +155,6 @@ app.get('/api/expenses', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/expenses/:id
 app.get('/api/expenses/:id',
   param('id').isUUID(),
   validate,
@@ -172,7 +167,6 @@ app.get('/api/expenses/:id',
   }
 );
 
-// POST /api/expenses
 app.post('/api/expenses',
   body('description').trim().notEmpty().isLength({ max: 255 }),
   body('amount').isFloat({ gt: 0 }),
@@ -202,7 +196,6 @@ app.post('/api/expenses',
   }
 );
 
-// PUT /api/expenses/:id
 app.put('/api/expenses/:id',
   param('id').isUUID(),
   body('description').optional().trim().notEmpty().isLength({ max: 255 }),
@@ -237,7 +230,6 @@ app.put('/api/expenses/:id',
   }
 );
 
-// DELETE /api/expenses/:id
 app.delete('/api/expenses/:id',
   param('id').isUUID(),
   validate,
@@ -254,7 +246,6 @@ app.delete('/api/expenses/:id',
 //  ROTAS — ORÇAMENTOS
 // ════════════════════════════════════════════════════════════
 
-// GET /api/budgets
 app.get('/api/budgets', async (req, res, next) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM budgets ORDER BY category');
@@ -262,7 +253,6 @@ app.get('/api/budgets', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PUT /api/budgets  — upsert
 app.put('/api/budgets',
   body('category').isIn(VALID_CATEGORIES),
   body('limit').isFloat({ min: 0 }),
@@ -280,7 +270,6 @@ app.put('/api/budgets',
   }
 );
 
-// DELETE /api/budgets/:category
 app.delete('/api/budgets/:category',
   param('category').isIn(VALID_CATEGORIES),
   validate,
@@ -296,10 +285,9 @@ app.delete('/api/budgets/:category',
 //  ROTAS — RELATÓRIOS / ANALYTICS
 // ════════════════════════════════════════════════════════════
 
-// GET /api/reports/summary?month=YYYY-MM
 app.get('/api/reports/summary', async (req, res, next) => {
   try {
-    const { month } = req.query; // ex.: "2025-06"
+    const { month } = req.query;
     let where = '';
     const vals = [];
 
@@ -319,7 +307,6 @@ app.get('/api/reports/summary', async (req, res, next) => {
        FROM expenses ${where}`, vals
     );
 
-    // Progresso de orçamento por categoria
     const [budgets] = await pool.execute('SELECT * FROM budgets');
     const budgetMap = {};
     budgets.forEach(b => { budgetMap[b.category] = parseFloat(b.monthly_limit); });
@@ -342,7 +329,6 @@ app.get('/api/reports/summary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/reports/monthly  — últimos 12 meses
 app.get('/api/reports/monthly', async (req, res, next) => {
   try {
     const [rows] = await pool.execute(`
