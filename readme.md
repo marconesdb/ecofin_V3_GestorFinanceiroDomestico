@@ -282,3 +282,5 @@ Ele contém sua senha do banco de dados. Certifique-se de que o `.gitignore` con
 ## 📞 Suporte
 
 Se tiver dúvidas, abra uma **Issue** no repositório do GitHub descrevendo o problema e a mensagem de erro que apareceu no terminal.
+
+## 👨‍💻 Desenvolvido por **Marcone S. de Brito**
