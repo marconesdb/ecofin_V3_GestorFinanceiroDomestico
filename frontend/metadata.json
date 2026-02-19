@@ -1,0 +1,7 @@
+{
+  "name": "EcoFin - Gestão de Despesas Domésticas",
+  "description": "Uma plataforma moderna e inteligente para gerir finanças pessoais com insights alimentados por IA (Gemini), gráficos interativos e uma interface acessível.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
