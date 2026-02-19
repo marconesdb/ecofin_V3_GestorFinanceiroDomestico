@@ -4,6 +4,16 @@
 
 ---
 
+![Layout para Desktops](/frontend/preview-01.png)
+
+
+
+![Layout para Desktops](/frontend/preview-02.png)
+
+
+
+![Layout para Desktops](/frontend/preview-03.png)
+
 ## 📋 O que você vai precisar instalar antes de tudo
 
 Antes de começar, instale os programas abaixo no seu computador. Todos são **gratuitos**:
