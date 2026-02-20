@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: ecofin-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: CORS_ORIGIN
+        # ⚠️  Substitua pela URL exata do seu frontend no Vercel
+        value: https://ecofin-v3-gestor-financeiro-domestico-9jbi45rwb.vercel.app
+      - key: DB_HOST
+        sync: false   # preencha no painel do Render
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+    headers:
+      # O Render injeta esses headers NO PROXY — sobrescreve qualquer
+      # header que o Express também envie, evitando o header duplicado.
+      - path: /*
+        name: Access-Control-Allow-Origin
+        value: https://ecofin-v3-gestor-financeiro-domestico-9jbi45rwb.vercel.app
+      - path: /*
+        name: Access-Control-Allow-Methods
+        value: GET,POST,PUT,DELETE,PATCH,OPTIONS
+      - path: /*
+        name: Access-Control-Allow-Headers
+        value: Content-Type,Authorization,X-Requested-With
+      - path: /*
+        name: Access-Control-Allow-Credentials
+        value: "true"

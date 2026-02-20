@@ -1,10 +1,6 @@
 // ============================================================
 //  EcoFin — Backend Profissional  |  Node.js + Express + MySQL
 //  Arquivo: server.js
-//
-//  ⚠️  CORS: gerenciado pelo proxy do Render via render.yaml
-//  O Express NÃO usa o pacote cors() para evitar header duplicado.
-//  Apenas o preflight OPTIONS é tratado aqui.
 // ============================================================
 
 import express from 'express';
@@ -18,29 +14,45 @@ import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
-// ─── Configuração do App ────────────────────────────────────
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Origem permitida (usada só para validar o preflight OPTIONS)
 const ALLOWED_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:3000').trim();
 
-// ─── Middlewares Globais ────────────────────────────────────
+// ─── CORS Manual ────────────────────────────────────────────
+// NÃO usa o pacote cors() — escreve os headers diretamente com
+// res.set() que SOBRESCREVE qualquer valor já existente,
+// evitando o header duplicado injetado pelo proxy do Render.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
 
-app.use(helmet({
-  crossOriginResourcePolicy: false,   // não bloqueia recursos cross-origin
-}));
+  // Sobrescreve (não adiciona) o header — resolve o "multiple values"
+  if (origin && origin.startsWith(ALLOWED_ORIGIN)) {
+    res.set('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // Curl, Postman, apps mobile — sem origin é sempre permitido
+    res.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  }
 
+  res.set('Access-Control-Allow-Methods',     'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  res.set('Access-Control-Allow-Headers',     'Content-Type,Authorization,X-Requested-With');
+  res.set('Access-Control-Allow-Credentials', 'true');
+  res.set('Vary', 'Origin');
+
+  // Preflight: responde imediatamente sem passar pelos outros middlewares
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+// ─── Outros Middlewares ─────────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
 app.use(morgan('dev'));
 
-// ── Preflight OPTIONS ──────────────────────────────────────
-// O Render injeta os headers CORS via proxy (render.yaml).
-// Aqui apenas garantimos que o preflight receba 204 rapidamente,
-// SEM adicionar headers CORS manualmente (evita duplicata).
-app.options('*', (req, res) => res.sendStatus(204));
-
-// Rate Limiter (100 req/15min por IP)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -111,7 +123,6 @@ function validate(req, res, next) {
   next();
 }
 
-// ─── Categorias válidas ─────────────────────────────────────
 const VALID_CATEGORIES = [
   'Alimentação','Transporte','Moradia',
   'Contas Fixas','Lazer','Saúde','Educação','Outros'
@@ -128,19 +139,17 @@ app.get('/api/expenses', async (req, res, next) => {
     let sql    = 'SELECT * FROM expenses WHERE 1=1';
     const vals = [];
 
-    if (category)  { sql += ' AND category = ?';         vals.push(category); }
-    if (startDate) { sql += ' AND date >= ?';             vals.push(startDate); }
-    if (endDate)   { sql += ' AND date <= ?';             vals.push(endDate); }
-    if (search)    { sql += ' AND description LIKE ?';    vals.push(`%${search}%`); }
+    if (category)  { sql += ' AND category = ?';      vals.push(category); }
+    if (startDate) { sql += ' AND date >= ?';          vals.push(startDate); }
+    if (endDate)   { sql += ' AND date <= ?';          vals.push(endDate); }
+    if (search)    { sql += ' AND description LIKE ?'; vals.push(`%${search}%`); }
 
     sql += ' ORDER BY date DESC, created_at DESC';
-
     const offset = (parseInt(page) - 1) * parseInt(limit);
     sql += ` LIMIT ${parseInt(limit)} OFFSET ${offset}`;
 
     const [rows] = await pool.execute(sql, vals);
 
-    // countVals separado — sem o LIMIT/OFFSET
     const countVals = [];
     if (category)  countVals.push(category);
     if (startDate) countVals.push(startDate);
@@ -170,8 +179,7 @@ app.get('/api/expenses', async (req, res, next) => {
 });
 
 app.get('/api/expenses/:id',
-  param('id').isUUID(),
-  validate,
+  param('id').isUUID(), validate,
   async (req, res, next) => {
     try {
       const [[row]] = await pool.execute(
@@ -259,8 +267,7 @@ app.put('/api/expenses/:id',
 );
 
 app.delete('/api/expenses/:id',
-  param('id').isUUID(),
-  validate,
+  param('id').isUUID(), validate,
   async (req, res, next) => {
     try {
       const [result] = await pool.execute(
@@ -302,8 +309,7 @@ app.put('/api/budgets',
 );
 
 app.delete('/api/budgets/:category',
-  param('category').isIn(VALID_CATEGORIES),
-  validate,
+  param('category').isIn(VALID_CATEGORIES), validate,
   async (req, res, next) => {
     try {
       await pool.execute(
