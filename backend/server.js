@@ -21,7 +21,18 @@ const PORT = process.env.PORT || 3001;
 
 // ─── Middlewares Globais ────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
+//app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
+
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',');
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.some(o => origin.startsWith(o.trim()))) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 app.use(express.json());
 app.use(morgan('dev'));
 
