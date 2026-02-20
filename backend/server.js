@@ -1,11 +1,14 @@
 // ============================================================
 //  EcoFin — Backend Profissional  |  Node.js + Express + MySQL
 //  Arquivo: server.js
+//
+//  ⚠️  CORS: gerenciado pelo proxy do Render via render.yaml
+//  O Express NÃO usa o pacote cors() para evitar header duplicado.
+//  Apenas o preflight OPTIONS é tratado aqui.
 // ============================================================
 
 import express from 'express';
 import mysql from 'mysql2/promise';
-import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
@@ -19,60 +22,23 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ─── Origens permitidas ─────────────────────────────────────
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
-  .split(',')
-  .map(o => o.trim());
+// Origem permitida (usada só para validar o preflight OPTIONS)
+const ALLOWED_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:3000').trim();
 
 // ─── Middlewares Globais ────────────────────────────────────
 
-// ⚠️  IMPORTANTE: Remove qualquer header CORS injetado por proxies
-// externos (Render, Clever Cloud) ANTES do cors() agir,
-// evitando o erro "header contains multiple values".
-app.use((req, res, next) => {
-  res.removeHeader('Access-Control-Allow-Origin');
-  res.removeHeader('Access-Control-Allow-Methods');
-  res.removeHeader('Access-Control-Allow-Headers');
-  res.removeHeader('Access-Control-Allow-Credentials');
-  next();
-});
-
-// Responde preflight OPTIONS imediatamente (antes do helmet/rate-limit)
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.some(o => origin.startsWith(o))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight por 24h
-  return res.sendStatus(204);
-});
-
-// Configura CORS para todas as demais rotas
-app.use(cors({
-  origin: (origin, callback) => {
-    // Permite requisições sem origin (ex: curl, Postman, mobile)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.some(o => origin.startsWith(o))) {
-      return callback(null, true);
-    }
-    return callback(new Error(`CORS bloqueado para origem: ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 204,
-}));
-
 app.use(helmet({
-  // Desativa o crossOriginResourcePolicy para não conflitar com CORS
-  crossOriginResourcePolicy: false,
+  crossOriginResourcePolicy: false,   // não bloqueia recursos cross-origin
 }));
 
 app.use(express.json());
 app.use(morgan('dev'));
+
+// ── Preflight OPTIONS ──────────────────────────────────────
+// O Render injeta os headers CORS via proxy (render.yaml).
+// Aqui apenas garantimos que o preflight receba 204 rapidamente,
+// SEM adicionar headers CORS manualmente (evita duplicata).
+app.options('*', (req, res) => res.sendStatus(204));
 
 // Rate Limiter (100 req/15min por IP)
 app.use(rateLimit({
@@ -94,7 +60,7 @@ const pool = mysql.createPool({
   connectionLimit:    10,
   queueLimit:         0,
   timezone: '-03:00',
-  ssl: { rejectUnauthorized: false }  // ← SSL para Clever Cloud
+  ssl: { rejectUnauthorized: false }
 });
 
 // ─── Inicialização do Banco de Dados ────────────────────────
@@ -141,9 +107,7 @@ async function initDB() {
 // ─── Helper: validação de erros ────────────────────────────
 function validate(req, res, next) {
   const errs = validationResult(req);
-  if (!errs.isEmpty()) {
-    return res.status(422).json({ errors: errs.array() });
-  }
+  if (!errs.isEmpty()) return res.status(422).json({ errors: errs.array() });
   next();
 }
 
@@ -176,7 +140,7 @@ app.get('/api/expenses', async (req, res, next) => {
 
     const [rows] = await pool.execute(sql, vals);
 
-    // Reconstrói vals para o COUNT sem o LIMIT/OFFSET
+    // countVals separado — sem o LIMIT/OFFSET
     const countVals = [];
     if (category)  countVals.push(category);
     if (startDate) countVals.push(startDate);
@@ -185,10 +149,10 @@ app.get('/api/expenses', async (req, res, next) => {
 
     const [[{ total }]] = await pool.execute(
       `SELECT COUNT(*) AS total FROM expenses WHERE 1=1${
-        category  ? ' AND category = ?'          : ''}${
-        startDate ? ' AND date >= ?'             : ''}${
-        endDate   ? ' AND date <= ?'             : ''}${
-        search    ? ' AND description LIKE ?'    : ''}`,
+        category  ? ' AND category = ?'       : ''}${
+        startDate ? ' AND date >= ?'          : ''}${
+        endDate   ? ' AND date <= ?'          : ''}${
+        search    ? ' AND description LIKE ?' : ''}`,
       countVals
     );
 
@@ -210,7 +174,9 @@ app.get('/api/expenses/:id',
   validate,
   async (req, res, next) => {
     try {
-      const [[row]] = await pool.execute('SELECT * FROM expenses WHERE id = ?', [req.params.id]);
+      const [[row]] = await pool.execute(
+        'SELECT * FROM expenses WHERE id = ?', [req.params.id]
+      );
       if (!row) return res.status(404).json({ error: 'Despesa não encontrada.' });
       res.json({
         ...row,
@@ -248,7 +214,9 @@ app.post('/api/expenses',
         [id, description, parseFloat(amount), category, date, isRecurring ? 1 : 0]
       );
 
-      res.status(201).json({ id, description, amount: parseFloat(amount), category, date, isRecurring });
+      res.status(201).json({
+        id, description, amount: parseFloat(amount), category, date, isRecurring
+      });
     } catch (err) { next(err); }
   }
 );
@@ -263,8 +231,8 @@ app.put('/api/expenses/:id',
   validate,
   async (req, res, next) => {
     try {
-      const fields = [];
-      const vals   = [];
+      const fields  = [];
+      const vals    = [];
       const allowed = ['description','amount','category','date','isRecurring'];
 
       for (const key of allowed) {
@@ -274,14 +242,17 @@ app.put('/api/expenses/:id',
         }
       }
 
-      if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar.' });
+      if (!fields.length)
+        return res.status(400).json({ error: 'Nenhum campo para atualizar.' });
 
       vals.push(req.params.id);
       const [result] = await pool.execute(
         `UPDATE expenses SET ${fields.join(', ')} WHERE id = ?`, vals
       );
 
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Despesa não encontrada.' });
+      if (result.affectedRows === 0)
+        return res.status(404).json({ error: 'Despesa não encontrada.' });
+
       res.json({ message: 'Despesa atualizada com sucesso.' });
     } catch (err) { next(err); }
   }
@@ -292,8 +263,11 @@ app.delete('/api/expenses/:id',
   validate,
   async (req, res, next) => {
     try {
-      const [result] = await pool.execute('DELETE FROM expenses WHERE id = ?', [req.params.id]);
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Despesa não encontrada.' });
+      const [result] = await pool.execute(
+        'DELETE FROM expenses WHERE id = ?', [req.params.id]
+      );
+      if (result.affectedRows === 0)
+        return res.status(404).json({ error: 'Despesa não encontrada.' });
       res.json({ message: 'Despesa removida com sucesso.' });
     } catch (err) { next(err); }
   }
@@ -332,7 +306,9 @@ app.delete('/api/budgets/:category',
   validate,
   async (req, res, next) => {
     try {
-      await pool.execute('DELETE FROM budgets WHERE category = ?', [req.params.category]);
+      await pool.execute(
+        'DELETE FROM budgets WHERE category = ?', [req.params.category]
+      );
       res.json({ message: 'Orçamento removido.' });
     } catch (err) { next(err); }
   }
@@ -369,13 +345,13 @@ app.get('/api/reports/summary', async (req, res, next) => {
     budgets.forEach(b => { budgetMap[b.category] = parseFloat(b.monthly_limit); });
 
     const summary = byCategory.map(r => ({
-      category:      r.category,
-      total:         parseFloat(r.total),
-      count:         r.count,
-      budget_limit:  budgetMap[r.category] || 0,
-      budget_pct:    budgetMap[r.category]
-                       ? ((parseFloat(r.total) / budgetMap[r.category]) * 100).toFixed(1)
-                       : null,
+      category:     r.category,
+      total:        parseFloat(r.total),
+      count:        r.count,
+      budget_limit: budgetMap[r.category] || 0,
+      budget_pct:   budgetMap[r.category]
+                      ? ((parseFloat(r.total) / budgetMap[r.category]) * 100).toFixed(1)
+                      : null,
     }));
 
     res.json({
@@ -415,12 +391,6 @@ app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 // ─── Error Handler Global ─────────────────────────────────────
 app.use((err, req, res, _next) => {
   console.error('❌  Erro interno:', err);
-
-  // Erro de CORS: retorna 403 com mensagem clara
-  if (err.message && err.message.startsWith('CORS bloqueado')) {
-    return res.status(403).json({ error: err.message });
-  }
-
   const status = err.status || 500;
   res.status(status).json({
     error: status === 500 ? 'Erro interno do servidor.' : err.message
