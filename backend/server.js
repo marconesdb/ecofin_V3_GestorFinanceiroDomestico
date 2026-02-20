@@ -19,20 +19,58 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ─── Middlewares Globais ────────────────────────────────────
-app.use(helmet());
-//app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
+// ─── Origens permitidas ─────────────────────────────────────
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+  .split(',')
+  .map(o => o.trim());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',');
+// ─── Middlewares Globais ────────────────────────────────────
+
+// ⚠️  IMPORTANTE: Remove qualquer header CORS injetado por proxies
+// externos (Render, Clever Cloud) ANTES do cors() agir,
+// evitando o erro "header contains multiple values".
+app.use((req, res, next) => {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.removeHeader('Access-Control-Allow-Methods');
+  res.removeHeader('Access-Control-Allow-Headers');
+  res.removeHeader('Access-Control-Allow-Credentials');
+  next();
+});
+
+// Responde preflight OPTIONS imediatamente (antes do helmet/rate-limit)
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.some(o => origin.startsWith(o))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight por 24h
+  return res.sendStatus(204);
+});
+
+// Configura CORS para todas as demais rotas
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o.trim()))) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    // Permite requisições sem origin (ex: curl, Postman, mobile)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some(o => origin.startsWith(o))) {
+      return callback(null, true);
     }
-  }
+    return callback(new Error(`CORS bloqueado para origem: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 204,
 }));
+
+app.use(helmet({
+  // Desativa o crossOriginResourcePolicy para não conflitar com CORS
+  crossOriginResourcePolicy: false,
+}));
+
 app.use(express.json());
 app.use(morgan('dev'));
 
@@ -138,28 +176,29 @@ app.get('/api/expenses', async (req, res, next) => {
 
     const [rows] = await pool.execute(sql, vals);
 
+    // Reconstrói vals para o COUNT sem o LIMIT/OFFSET
+    const countVals = [];
+    if (category)  countVals.push(category);
+    if (startDate) countVals.push(startDate);
+    if (endDate)   countVals.push(endDate);
+    if (search)    countVals.push(`%${search}%`);
+
     const [[{ total }]] = await pool.execute(
       `SELECT COUNT(*) AS total FROM expenses WHERE 1=1${
-        category  ? ' AND category = ?' : ''}${
-        startDate ? ' AND date >= ?'    : ''}${
-        endDate   ? ' AND date <= ?'    : ''}${
-        search    ? ' AND description LIKE ?' : ''}`,
-      vals.slice(0, vals.length - 0)
-        .filter((_, i) => {
-          const base = [];
-          if (category)  base.push(category);
-          if (startDate) base.push(startDate);
-          if (endDate)   base.push(endDate);
-          if (search)    base.push(`%${search}%`);
-          return base[i] !== undefined;
-        })
+        category  ? ' AND category = ?'          : ''}${
+        startDate ? ' AND date >= ?'             : ''}${
+        endDate   ? ' AND date <= ?'             : ''}${
+        search    ? ' AND description LIKE ?'    : ''}`,
+      countVals
     );
 
     const mapped = rows.map(r => ({
       ...r,
       amount:      parseFloat(r.amount),
       isRecurring: !!r.isRecurring,
-      date:        r.date.toISOString().split('T')[0],
+      date:        r.date instanceof Date
+                     ? r.date.toISOString().split('T')[0]
+                     : r.date,
     }));
 
     res.json({ data: mapped, total, page: parseInt(page), limit: parseInt(limit) });
@@ -173,7 +212,14 @@ app.get('/api/expenses/:id',
     try {
       const [[row]] = await pool.execute('SELECT * FROM expenses WHERE id = ?', [req.params.id]);
       if (!row) return res.status(404).json({ error: 'Despesa não encontrada.' });
-      res.json({ ...row, amount: parseFloat(row.amount), isRecurring: !!row.isRecurring });
+      res.json({
+        ...row,
+        amount:      parseFloat(row.amount),
+        isRecurring: !!row.isRecurring,
+        date:        row.date instanceof Date
+                       ? row.date.toISOString().split('T')[0]
+                       : row.date,
+      });
     } catch (err) { next(err); }
   }
 );
@@ -369,6 +415,12 @@ app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 // ─── Error Handler Global ─────────────────────────────────────
 app.use((err, req, res, _next) => {
   console.error('❌  Erro interno:', err);
+
+  // Erro de CORS: retorna 403 com mensagem clara
+  if (err.message && err.message.startsWith('CORS bloqueado')) {
+    return res.status(403).json({ error: err.message });
+  }
+
   const status = err.status || 500;
   res.status(status).json({
     error: status === 500 ? 'Erro interno do servidor.' : err.message
