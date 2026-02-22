@@ -10,9 +10,17 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 
-//const API_URL = 'http://localhost:3001/api';
-
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+// ─── Helper: formata "YYYY-MM-DD" → "DD/MM/YYYY" sem criar Date ─
+// new Date('2026-02-20') interpreta como UTC meia-noite e subtrai
+// 3h no Brasil, exibindo o dia anterior. Formatando a string
+// diretamente evitamos qualquer conversão de fuso horário.
+function formatDateBR(dateStr: string): string {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
 
 const App: React.FC = () => {
   // --- Estado ---
@@ -37,10 +45,8 @@ const App: React.FC = () => {
         const expData = await expRes.json();
         const budData = await budRes.json();
 
-        // ✅ CORRIGIDO: backend retorna { data: [...] }, com fallback para array direto
         setExpenses(expData.data ?? expData);
 
-        // ✅ monthly_limit → limit
         setBudgetGoals(budData.map((b: any) => ({
           category: b.category,
           limit: b.monthly_limit
@@ -368,7 +374,7 @@ const App: React.FC = () => {
                         .map(exp => (
                           <tr key={exp.id} className="hover:bg-slate-50 transition-colors group">
                             <td className="px-8 py-6 text-xs font-bold text-slate-400">
-                              {new Date(exp.date).toLocaleDateString('pt-BR')}
+                              {formatDateBR(exp.date)}
                             </td>
                             <td className="px-8 py-6">
                               <p className="text-sm font-black text-slate-800">{exp.description}</p>
