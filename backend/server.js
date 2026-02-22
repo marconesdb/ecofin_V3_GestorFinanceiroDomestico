@@ -19,6 +19,18 @@ const PORT = process.env.PORT || 3001;
 
 const ALLOWED_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:3000').trim();
 
+// ─── Helper: formata Date sem perder dia por fuso horário ───
+// toISOString() converte para UTC e subtrai 3h no Brasil,
+// jogando a data para o dia anterior. getFullYear/Month/Date
+// lê no horário local do servidor — sem conversão.
+function formatDate(d) {
+  if (!(d instanceof Date)) return d;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ─── CORS Manual ────────────────────────────────────────────
 // NÃO usa o pacote cors() — escreve os headers diretamente com
 // res.set() que SOBRESCREVE qualquer valor já existente,
@@ -26,11 +38,9 @@ const ALLOWED_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:3000').trim
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  // Sobrescreve (não adiciona) o header — resolve o "multiple values"
   if (origin && origin.startsWith(ALLOWED_ORIGIN)) {
     res.set('Access-Control-Allow-Origin', origin);
   } else if (!origin) {
-    // Curl, Postman, apps mobile — sem origin é sempre permitido
     res.set('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
   }
 
@@ -39,7 +49,6 @@ app.use((req, res, next) => {
   res.set('Access-Control-Allow-Credentials', 'true');
   res.set('Vary', 'Origin');
 
-  // Preflight: responde imediatamente sem passar pelos outros middlewares
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Max-Age', '86400');
     return res.sendStatus(204);
@@ -169,9 +178,7 @@ app.get('/api/expenses', async (req, res, next) => {
       ...r,
       amount:      parseFloat(r.amount),
       isRecurring: !!r.isRecurring,
-      date:        r.date instanceof Date
-                     ? r.date.toISOString().split('T')[0]
-                     : r.date,
+      date:        formatDate(r.date),   // ← corrigido: sem conversão UTC
     }));
 
     res.json({ data: mapped, total, page: parseInt(page), limit: parseInt(limit) });
@@ -190,9 +197,7 @@ app.get('/api/expenses/:id',
         ...row,
         amount:      parseFloat(row.amount),
         isRecurring: !!row.isRecurring,
-        date:        row.date instanceof Date
-                       ? row.date.toISOString().split('T')[0]
-                       : row.date,
+        date:        formatDate(row.date),  // ← corrigido: sem conversão UTC
       });
     } catch (err) { next(err); }
   }
